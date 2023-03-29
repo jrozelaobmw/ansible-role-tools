@@ -1,0 +1,92 @@
+---
+##### COMMON TASKS ############################################################################################
+- name: Create AHADM group
+  group:
+    name: ahadm
+    state: present
+
+- name: Create AHSSH userID
+  user:
+    name: ahssh
+    comment: 897/S/C-AM5S//Sec5ITIM. Sec5ITIM *FUNCTIONAL-ID*/sec5itim@us.ibm.com
+    groups: ahadm, No2FA
+    create_home: true
+
+- name: Create AHSSHOPS userID
+  user:
+    name: ahsshops
+    comment: 897/S/C-N2FT//Request,*FUNCTIONAL-ID*/gis3adt@us.ibm.com
+    groups: ahadm
+    create_home: true
+
+- name: Add SSH-KEY
+  authorized_key:
+    user: ahssh
+    state: present
+    key: "{{ lookup('file', 'authorized_keys') }}" 
+
+################################################################################################################
+##### LINUX ####################################################################################################
+- name: Configure AccessHub pre-requisites
+  block:
+    - name: LINUX - Add AccessHub Sudo Template to /etc/sudoers.d folder
+      copy:
+        src: "{{ item }}"
+        dest: /etc/sudoers.d
+        owner: root
+        group: root
+        mode: '0440'
+        force: yes
+      with_items:
+        - 153_ACCESSHUB_LINUX_GLB
+
+    - name: LINUX - Add AccessHub Sudo Template in Sudoers file
+      lineinfile:
+        path: /etc/sudoers
+        line: "#include /etc/sudoers.d/153_ACCESSHUB_LINUX_GLB"
+        insertafter: '#include'
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: LINUX - Setup AHSSH user ID password to never expire
+      shell: chage -I -1 -m 1 -M 99999 -E -1 ahssh
+  when: ansible_distribution == 'RedHat' or ansible_distribution == 'SLES' or ansible_distribution == 'CentOS' 
+  tags: accesshub_setup
+
+################################################################################################################
+###### AIX #####################################################################################################
+- name: Configure AccessHub pre-requisites
+  block:
+    - name: AIX - Add AccessHub Sudo Template to /etc/sudoers.d folder
+      copy:
+        src: "{{ item }}"
+        dest: /etc/sudoers.d
+        owner: root
+        group: system
+        mode: '0440'
+        force: yes
+      with_items:
+        - 153_ACCESSHUB_AIX_GLB
+
+    - name: AIX - Add AccessHub Sudo Template in Sudoers file
+      lineinfile:
+        path: /etc/sudoers
+        line: "#include /etc/sudoers.d/153_ACCESSHUB_AIX_GLB"
+        insertafter: '#include'
+        validate: /usr/sbin/visudo -cf %s
+
+    - name: Add AHSSH and AHSSHOPS to Security group for AIX servers
+      user:
+        name: "{{ item }}"
+        groups: ahadm,security,No2FA
+      with_items:
+        - ahssh
+        - ahsshops
+
+    - name: AIX - Setup AHSSH user ID password to never expire
+      shell: chuser maxage=0 ahssh
+
+    - name: AIX - Remove password
+      shell: echo "ahssh:*" | chpasswd -c -e
+  when: ansible_distribution == 'AIX'
+  tags: accesshub_setup
+
